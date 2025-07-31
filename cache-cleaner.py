@@ -3,32 +3,32 @@ import time
 import datetime
 
 print('cache-cleaner\n')
-    
-dirToBeEmptied = './static/'
+
+dirToBeEmptied = 'static/'
 
 while True:
- 
-    ds = list(os.walk(dirToBeEmptied))
-    delta = datetime.timedelta(days=30)
-    now = datetime.datetime.now()
 
-    n = 0
- 
-    for d in ds:
-        os.chdir(d[0])
-        if d[2] != []:
-            for x in d[2]:
-                ctime = datetime.datetime.fromtimestamp(os.path.getatime(x))
-                if ctime < (now-delta):
-                    os.remove(x)
-                    n += 1
+	ds = list(os.walk(dirToBeEmptied))
+	delta = datetime.timedelta(days=30)
+	now = datetime.datetime.now()
 
-    print(datetime.datetime.now().strftime('%Y.%m.%d %A %H:%M:%S'), end=' - ')
-    if n == 0:
-        print('没有已过期的缓存')
-    else:
-        print(f'共删除了{n}张缓存图片')
+	n = 0
 
-    dirToBeEmptied = './'
+	for d in ds:
+		os.chdir(d[0])
+		if d[2] != []:
+			for x in d[2]:
+				atime = datetime.datetime.fromtimestamp(os.path.getatime(x))
+				if atime < (now-delta):
+					os.remove(x)
+					n += 1
 
-    time.sleep(86400)
+	print(datetime.datetime.now().strftime('%Y.%m.%d %H:%M:%S'), end=' - ')
+	if n == 0:
+		print('没有已过期的缓存')
+	else:
+		print(f'共删除了{n}张缓存图片')
+
+	dirToBeEmptied = './'
+
+	time.sleep(86400)
