@@ -1,0 +1,5 @@
+# 编辑crontab
+crontab -e
+
+# 添加以下行（每天凌晨2点执行清理）
+0 2 * * * /usr/bin/python3 /home/ubuntu/Server/image-resizer/cache_cleaner.py >> /var/log/cache-cleaner.log 2>&1
