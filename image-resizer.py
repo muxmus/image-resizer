@@ -10,6 +10,16 @@ import fcntl
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
+#   格式参考B站，示例：
+#   http://127.0.0.1:10000/example.jpg@1920w_1080h.webp
+#   http://127.0.0.1:10000/example.png@800w_800h.avif
+#   http://127.0.0.1:10000/example.webp@512h.jpg
+#   http://127.0.0.1:10000/example.avif@256w.png
+#   http://127.0.0.1:10000/example.ico@.gif
+#   http://127.0.0.1:10000/example.gif@64w_64h.ico
+#   宽或高超出原图时，仅转换格式，不改变图片尺寸
+#   宽和高都指定时，依旧保持原比例，以在原宽或原高中占比更大的那一边为标准进行缩小
+
 # 配置
 BASE_IMG_DIR = "/path/to/img"
 CACHE_DIR = "/path/to/image-resizer/image_cache"
@@ -247,3 +257,4 @@ if __name__ == '__main__':
     logger.info(f"Max workers: {MAX_WORKERS}")
     
     app.run(host=HOST, port=PORT, threaded=True)
+
