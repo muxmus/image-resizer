@@ -249,8 +249,11 @@ def serve_image(image_path):
         return send_file(result_path, mimetype=mime)
 
     except Exception as e:
+        from werkzeug.exceptions import HTTPException
         with task_lock:
             processing_tasks.pop(image_path, None)
+        if isinstance(e, HTTPException):
+            raise
         logger.error(f"Error processing {image_path}: {str(e)}")
         abort(500)
 
