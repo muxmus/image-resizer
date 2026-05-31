@@ -16,9 +16,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 # 格式参考B站，示例：
-# http://127.0.0.1:10000/example.png@1920w_1080h.avif
-# http://127.0.0.1:10000/example.jpg@800w.webp
-# http://127.0.0.1:10000/example.avif@.jpg
+# http://127.0.0.1:10000/example.jpg@1920w_1080h.webp
+# http://127.0.0.1:10000/example.png@800w_800h.avif
+# http://127.0.0.1:10000/example.webp@512h.jpg
+# http://127.0.0.1:10000/example.avif@256w.png
+# http://127.0.0.1:10000/example.avif@256w.webp
+# http://127.0.0.1:10000/example.webp@800w.avif
 #
 # 输入支持：jpg/jpeg、png、webp、avif（需 Pillow >= 9.1 且系统有 libavif）
 # 输出支持：jpg、webp、avif
@@ -190,15 +193,15 @@ def create_thumbnail(original_path, cache_path, width, height, target_format):
 
 
 def process_image_request(relative_path):
-    """处理图片请求"""
+    """处理图片请求，返回 (cache_path, error_message, status_code)"""
     filename = os.path.basename(relative_path)
     original_name, width, height, format_ext = parse_filename(filename)
 
     if not original_name:
-        return None, "Invalid filename format"
+        return None, "Invalid filename format", 400
 
     if format_ext not in format_map:
-        return None, f"Unsupported output format: {format_ext}"
+        return None, f"Unsupported output format: {format_ext}", 415
 
     target_format, mime_type = format_map[format_ext]
 
@@ -208,39 +211,39 @@ def process_image_request(relative_path):
     cache_path    = get_cache_image_path(relative_path)
 
     if not os.path.exists(original_path):
-        return None, "Original image not found"
+        return None, "Original image not found", 404
 
     # 检查缓存是否仍有效（mtime 一致）
     if os.path.exists(cache_path):
         orig_mtime  = os.path.getmtime(original_path)
         cache_mtime = os.path.getmtime(cache_path)
         if orig_mtime == cache_mtime:
-            return cache_path, None
+            return cache_path, None, 200
 
     if create_thumbnail(original_path, cache_path, width, height, target_format):
-        return cache_path, None
+        return cache_path, None, 200
     else:
-        return None, "Failed to create thumbnail"
+        return None, "Failed to create thumbnail", 500
 
 
 @app.route('/<path:image_path>')
 def serve_image(image_path):
     """处理图片请求"""
     if '@' not in image_path or '.' not in image_path.split('@')[-1]:
-        abort(404)
+        abort(400)
 
     future = executor.submit(process_image_request, image_path)
     with task_lock:
         processing_tasks[image_path] = future
 
     try:
-        result_path, error = future.result(timeout=30)
+        result_path, error, status_code = future.result(timeout=30)
         with task_lock:
             processing_tasks.pop(image_path, None)
 
         if error:
-            logger.warning(f"Image processing failed for {image_path}: {error}")
-            abort(404)
+            logger.warning(f"[{status_code}] {image_path}: {error}")
+            abort(status_code)
 
         mime = format_map[image_path.split('.')[-1].lower()][1]
         return send_file(result_path, mimetype=mime)
