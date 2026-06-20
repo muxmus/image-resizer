@@ -1,0 +1,14 @@
+{
+  "name": "image-resizer",
+  "version": "2.0.0",
+  "description": "Flask image resizer rewritten in Node.js + Sharp (libvips)",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev":   "node --watch app.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "sharp":   "^0.33.0"
+  }
+}

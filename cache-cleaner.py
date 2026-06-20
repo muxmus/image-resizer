@@ -1,13 +1,13 @@
 import os
+import re
 import time
 from pathlib import Path
-from datetime import datetime, timedelta
 import logging
 
-# 配置
-BASE_IMG_DIR = "/path/to/img"
-CACHE_DIR = "/path/to/image-resizer/image_cache"
-CACHE_MAX_AGE = 30  # 缓存最大天数
+# ---------- 配置 ----------
+BASE_IMG_DIR = "/home/ubuntu/Server/img"
+CACHE_DIR    = "/home/ubuntu/Server/image-resizer/image_cache"
+CACHE_MAX_AGE = 30  # 缓存最大未访问天数
 
 logging.basicConfig(
     level=logging.INFO,
@@ -15,72 +15,82 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 def parse_filename(filename):
-    """解析缓存文件名，提取原始文件名"""
-    import re
-    pattern = r'^(.*?)@((\d+)w)?_?((\d+)h)?\.([a-zA-Z]+)$'
-    match = re.match(pattern, filename)
+    """从缓存文件名提取原始文件名（去掉 @尺寸 描述符）"""
+    match = re.match(r'^(.*?)@((\d+)w)?_?((\d+)h)?\.([a-zA-Z]+)$', filename)
     return match.group(1) if match else None
 
+
 def cleanup_cache():
-    """清理缓存"""
     logger.info("Starting cache cleanup...")
-    
-    cache_files_checked = 0
-    cache_files_deleted = 0
-    errors = 0
-    
-    for cache_file_path in Path(CACHE_DIR).rglob('*@*.*'):
+
+    checked = 0
+    deleted = 0
+    errors  = 0
+
+    # ── 清理 .tmp 残留文件 ──────────────────────────────────────────────────
+    # 进程被 PM2/OOM killer 强杀时，原子写入的临时文件来不及被 catch 删除。
+    # Nginx 不会匹配 .tmp 后缀，但仍应定期清理以免占用磁盘。
+    for tmp_path in Path(CACHE_DIR).rglob('*.tmp'):
         try:
-            cache_files_checked += 1
-            relative_path = cache_file_path.relative_to(CACHE_DIR)
-            filename = relative_path.name
-            
-            # 提取原始文件名
-            original_name = parse_filename(filename)
-            if not original_name:
-                continue
-            
-            # 构建原始文件路径
-            original_relative = relative_path.parent / original_name
-            original_path = Path(BASE_IMG_DIR) / original_relative
-            
-            # 检查原始文件是否存在
-            if not original_path.exists():
-                # 原始文件不存在，删除缓存文件
-                cache_file_path.unlink()
-                cache_files_deleted += 1
-                logger.info(f"Deleted cache (original missing): {cache_file_path}")
-                continue
-            
-            # 检查mtime是否一致
-            cache_mtime = cache_file_path.stat().st_mtime
-            orig_mtime = original_path.stat().st_mtime
-            
-            if cache_mtime != orig_mtime:
-                # mtime不一致，删除缓存文件
-                cache_file_path.unlink()
-                cache_files_deleted += 1
-                logger.info(f"Deleted cache (mtime mismatch): {cache_file_path}")
-                continue
-            
-            # 检查atime（访问时间）
-            cache_atime = cache_file_path.stat().st_atime
-            cache_age = time.time() - cache_atime
-            max_age_seconds = CACHE_MAX_AGE * 24 * 60 * 60
-            
-            if cache_age > max_age_seconds:
-                # 缓存文件太久未被访问，删除
-                cache_file_path.unlink()
-                cache_files_deleted += 1
-                logger.info(f"Deleted cache (too old): {cache_file_path}")
-                
+            tmp_path.unlink()
+            deleted += 1
+            logger.info(f"Deleted (stale tmp): {tmp_path}")
         except Exception as e:
             errors += 1
-            logger.error(f"Error processing {cache_file_path}: {str(e)}")
-    
-    logger.info(f"Cache cleanup completed. Checked: {cache_files_checked}, "
-                f"Deleted: {cache_files_deleted}, Errors: {errors}")
+            logger.error(f"Error deleting tmp {tmp_path}: {e}")
+
+    # ── 清理正式缓存文件 ────────────────────────────────────────────────────
+    for cache_path in Path(CACHE_DIR).rglob('*@*.*'):
+        try:
+            checked += 1
+            stat = cache_path.stat()
+
+            # ① 空文件：处理失败时的遗留产物
+            #    若不删除，Nginx 的 try_files 会命中它并向客户端返回空内容，
+            #    且 Node.js 永远不会再收到该请求来重新生成。
+            if stat.st_size == 0:
+                cache_path.unlink()
+                deleted += 1
+                logger.info(f"Deleted (empty file): {cache_path}")
+                continue
+
+            relative = cache_path.relative_to(CACHE_DIR)
+            original_name = parse_filename(relative.name)
+            if not original_name:
+                continue
+
+            # ② 原图已删除
+            orig_path = Path(BASE_IMG_DIR) / relative.parent / original_name
+            if not orig_path.exists():
+                cache_path.unlink()
+                deleted += 1
+                logger.info(f"Deleted (original missing): {cache_path}")
+                continue
+
+            # ③ 原图已更新（mtime 不一致）
+            if stat.st_mtime != orig_path.stat().st_mtime:
+                cache_path.unlink()
+                deleted += 1
+                logger.info(f"Deleted (mtime mismatch): {cache_path}")
+                continue
+
+            # ④ 超过最大未访问天数
+            age_seconds = time.time() - stat.st_atime
+            if age_seconds > CACHE_MAX_AGE * 86400:
+                cache_path.unlink()
+                deleted += 1
+                logger.info(f"Deleted (not accessed for {CACHE_MAX_AGE}d): {cache_path}")
+
+        except Exception as e:
+            errors += 1
+            logger.error(f"Error processing {cache_path}: {e}")
+
+    logger.info(
+        f"Cache cleanup done — checked: {checked}, deleted: {deleted}, errors: {errors}"
+    )
+
 
 if __name__ == '__main__':
     cleanup_cache()
